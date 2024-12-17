@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import {IV3Factory} from "./interface/IV3Factory.sol";
 import {IV3Pool} from "./interface/IV3Pool.sol";
-import {IUniswapV3MintCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol";
 import "./libraries/LiquidityAmounts.sol";
 import "./libraries/TickMath.sol";
 import "./libraries/TransferHelper.sol";
 import "./structs/params.sol";
 import "./structs/storage.sol";
 
-contract LimitOrder is IUniswapV3MintCallback {
+contract LimitOrder {
     address internal owner;
     IV3Factory internal factory;
 
