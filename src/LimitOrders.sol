@@ -12,11 +12,10 @@ import "./structs/params.sol";
 import "./structs/storage.sol";
 
 contract LimitOrder is IUniswapV3MintCallback {
-    address public owner;
-
+    address internal owner;
     IV3Factory internal factory;
 
-    mapping(address => bool) poolSet;
+    mapping(address => bool) internal poolSet;
     mapping(address => bool) internal userSet;
 
     mapping(address => PoolInfo[]) internal poolKeys;
@@ -27,6 +26,7 @@ contract LimitOrder is IUniswapV3MintCallback {
 
     constructor(address _factory) {
         factory = IV3Factory(_factory);
+        owner = msg.sender;
     }
 
     function getUserPositions(
