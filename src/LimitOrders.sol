@@ -9,7 +9,7 @@ import "./structs/params.sol";
 import "./structs/storage.sol";
 
 contract LimitOrder {
-    address internal owner;
+    address public owner;
 
     mapping(address => bool) internal poolSet;
     mapping(address => bool) internal userSet;
