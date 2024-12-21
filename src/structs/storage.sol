@@ -15,3 +15,8 @@ struct PoolInfo {
     int24 tickLower;
     int24 tickUpper;
 }
+
+struct Context {
+    address user;
+    address pool;
+}

@@ -13,3 +13,10 @@ struct ClosePositionsParams {
     address user;
     uint256 index;
 }
+
+struct OrderParams {
+    address pool;
+    int24 target;
+    bool zeroForOne;
+    uint256 tokenAmount;
+}

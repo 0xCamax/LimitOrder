@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-
-import {IV3Factory} from "./interface/IV3Factory.sol";
 import {IV3Pool} from "./interface/IV3Pool.sol";
 import "./libraries/LiquidityAmounts.sol";
 import "./libraries/TickMath.sol";
@@ -12,7 +10,6 @@ import "./structs/storage.sol";
 
 contract LimitOrder {
     address internal owner;
-    IV3Factory internal factory;
 
     mapping(address => bool) internal poolSet;
     mapping(address => bool) internal userSet;
@@ -23,8 +20,15 @@ contract LimitOrder {
     address[] internal pools;
     address[] internal users;
 
-    constructor(address _factory) {
-        factory = IV3Factory(_factory);
+    Context internal context;
+
+    modifier setContext(address pool) {
+        context = Context(msg.sender, pool);
+        _;
+        context = Context(address(0), address(0));
+    }
+
+    constructor() {
         owner = msg.sender;
     }
 
@@ -35,49 +39,34 @@ contract LimitOrder {
     }
 
     function limitOrder(
-        int24 target,
-        address tokenFrom,
-        address tokenTo,
-        uint256 tokenAmount,
-        uint24 fee
-    ) public {
-        IV3Pool pool = IV3Pool(
-            factory.getPool(tokenFrom, tokenTo, fee)
-        );
-        bool zeroForOne = pool.token0() == tokenFrom ? true : false;
+        OrderParams memory params
+    ) public setContext(params.pool) {
+        IV3Pool pool = IV3Pool(params.pool);
+        int24 spacing = pool.tickSpacing();
 
-        (, int24 currentTick, , , , , ) = pool.slot0();
-
-        require(target >= 0, "Invalid target");
+        require(params.target % spacing == 0, "Invalid target");
 
         int24 tickLower;
         int24 tickUpper;
-        int24 spacing = pool.tickSpacing();
 
-        if (zeroForOne) {
-            tickLower =
-                (currentTick - (currentTick % spacing)) +
-                spacing *
-                target;
+        if (params.zeroForOne) {
+            tickLower = params.target;
             tickUpper = tickLower + spacing;
         } else {
-            tickUpper =
-                (currentTick - (currentTick % spacing)) -
-                spacing *
-                target;
+            tickUpper = params.target;
             tickLower = tickUpper - spacing;
         }
 
-        uint128 amount = tokenFrom == pool.token0()
+        uint128 amount = params.zeroForOne
             ? LiquidityAmounts.getLiquidityForAmount0(
                 TickMath.getSqrtRatioAtTick(tickLower),
                 TickMath.getSqrtRatioAtTick(tickUpper),
-                tokenAmount
+                params.tokenAmount
             )
             : LiquidityAmounts.getLiquidityForAmount1(
                 TickMath.getSqrtRatioAtTick(tickLower),
                 TickMath.getSqrtRatioAtTick(tickUpper),
-                tokenAmount
+                params.tokenAmount
             );
 
         pool.mint(
@@ -85,30 +74,30 @@ contract LimitOrder {
             tickLower,
             tickUpper,
             amount,
-            abi.encode(msg.sender, address(pool))
+            ""
         );
 
         bytes32 poolKey = keccak256(
             abi.encodePacked(address(this), tickLower, tickUpper)
         );
 
-        if (!poolSet[address(pool)]) {
-            pools.push(address(pool));
-            poolSet[address(pool)] = true;
+        if (!poolSet[params.pool]) {
+            pools.push(params.pool);
+            poolSet[params.pool] = true;
         }
         if (!userSet[msg.sender]) {
             users.push(msg.sender);
             userSet[msg.sender] = true;
         }
 
-        poolKeys[address(pool)].push(PoolInfo(poolKey, tickLower, tickUpper));
+        poolKeys[params.pool].push(PoolInfo(poolKey, tickLower, tickUpper));
 
         userPositions[msg.sender].push(
             PositionInfo({
-                pool: address(pool),
+                pool: params.pool,
                 owner: msg.sender,
                 liquidity: amount,
-                zeroForOne: zeroForOne,
+                zeroForOne: params.zeroForOne,
                 tickLower: tickLower,
                 tickUpper: tickUpper
             })
@@ -120,11 +109,14 @@ contract LimitOrder {
 
         require(msg.sender == position.owner, "Unauthorized");
 
-        IV3Pool pool = IV3Pool(position.pool);
         (uint256 amount0, uint256 amount1) = cancelPosition(index);
         position.zeroForOne
-            ? limitOrder(target, pool.token0(), pool.token1(), amount0, pool.fee())
-            : limitOrder(target, pool.token1(), pool.token0(), amount1, pool.fee());
+            ? limitOrder(
+                OrderParams(position.pool, target, position.zeroForOne, amount0)
+            )
+            : limitOrder(
+                OrderParams(position.pool, target, position.zeroForOne, amount1)
+            );
     }
 
     function cancelPosition(
@@ -136,7 +128,7 @@ contract LimitOrder {
     }
 
     function closePosition(bytes[] memory params) public {
-        for (uint i = 0; i < params.length; i++) {
+        for (uint256 i = 0; i < params.length; i++) {
             ClosePositionsParams memory param = abi.decode(
                 params[i],
                 (ClosePositionsParams)
@@ -169,13 +161,17 @@ contract LimitOrder {
         }
     }
 
-    function computeClosePositions() public view returns (bytes[] memory data) {
+    function computeClosePositionsParams()
+        public
+        view
+        returns (bytes[] memory data)
+    {
         address[] memory _users = users;
         uint256 count = 0;
-        for (uint i = 0; i < _users.length; i++) {
+        for (uint256 i = 0; i < _users.length; i++) {
             address user = _users[i];
             PositionInfo[] memory _userPositions = userPositions[user];
-            for (uint j = 0; j < _userPositions.length; j++) {
+            for (uint256 j = 0; j < _userPositions.length; j++) {
                 PositionInfo memory position = _userPositions[j];
                 if (position.liquidity > 0) {
                     if (_checkPosition(position)) {
@@ -188,10 +184,10 @@ contract LimitOrder {
         data = new bytes[](count);
 
         uint256 index = 0;
-        for (uint i = 0; i < _users.length; i++) {
+        for (uint256 i = 0; i < _users.length; i++) {
             address user = _users[i];
             PositionInfo[] memory _userPositions = userPositions[user];
-            for (uint j = 0; j < _userPositions.length; j++) {
+            for (uint256 j = 0; j < _userPositions.length; j++) {
                 PositionInfo memory position = _userPositions[j];
                 if (position.liquidity > 0) {
                     if (_checkPosition(position)) {
@@ -302,13 +298,18 @@ contract LimitOrder {
                 : currentTick > position.tickUpper;
     }
 
-    function uniswapV3MintCallback(
-        uint256 amount0Owed,
-        uint256 amount1Owed,
-        bytes calldata data
-    ) external {
-        (address user, address pool) = abi.decode(data, (address, address));
-        require(msg.sender == pool, "Unauthorized");
+    fallback() external {
+        bytes memory arguments = msg.data[4:];
+
+        (uint256 amount0Owed, uint256 amount1Owed, ) = abi
+            .decode(arguments, (uint256, uint256, bytes));
+
+        Context memory _context = context;
+        address user = _context.user;
+        address pool = _context.pool;
+
+        require(user != address(0) && pool != address(0), "Out of context");
+        require(msg.sender == pool, "Unauthorized caller");
 
         if (amount0Owed > 0) {
             TransferHelper.safeTransferFrom(
